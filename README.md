@@ -14,61 +14,20 @@ Automatically monitors the [Alpine Adventure news page](https://www.alpine-adven
 | **Telegram notification** | Sends a formatted HTML message to a Telegram chat. |
 | **Scheduled automation** | Runs every 6 hours via GitHub Actions `cron`. Manual runs are also supported. |
 
----
+## Join the Telegram channel
 
-## File Structure
+Pitztal Ice News: https://t.me/+6rJDCEqZPeQ3N2Vk
 
-```
-.
-├── .github/
-│   └── workflows/
-│       ├── monitor-news.yml   # Scheduled + manual monitor workflow
-│       └── ci.yml             # CI: runs tests on every push / pull request
-├── .gitignore                 # Ignores .pixi/, caches, build artefacts
-├── pixi.toml                  # Pixi workspace: dependencies, environments, tasks
-├── monitor_news.py            # Main script: scraping, tracking, translating, notifying
-├── README.md                  # This file
-├── data/
-│   └── last_seen.json         # Stores the last-detected news item
-└── tests/
-    └── test_monitor_news.py   # Unit tests (all I/O mocked, no credentials needed)
-```
+## How to contribute
 
----
+Did you find a mistake or you have in mind a new feature?
 
-## Setup
-
-### 1. Fork / clone the repository
+### 0. Fork / clone the repository
 
 ```bash
 git clone https://github.com/<your-user>/pitztal-ice-news-monitor.git
 cd pitztal-ice-news-monitor
 ```
-
-### 2. Create a Telegram bot
-
-1. Open Telegram and message **@BotFather**.
-2. Send `/newbot` and follow the prompts to get a **bot token**.
-3. Start a conversation with your new bot (or add it to a group) and retrieve the **chat ID**
-   (you can use `https://api.telegram.org/bot<TOKEN>/getUpdates`).
-
-### 3. Add GitHub Secrets
-
-In your repository go to **Settings → Secrets and variables → Actions → New repository secret**:
-
-| Secret name | Value |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | The token from BotFather (e.g. `123456:ABCdef…`) |
-| `TELEGRAM_CHAT_ID` | Your chat or group ID (e.g. `-1001234567890`) |
-
-### 4. Enable GitHub Actions
-
-The workflow runs automatically. You can also trigger it manually from the **Actions** tab
-using the **"Run workflow"** button.
-
----
-
-## Local testing
 
 ### 1. Install pixi
 
@@ -82,12 +41,10 @@ curl -fsSL https://pixi.sh/install.sh | sh
 iwr -useb https://pixi.sh/install.ps1 | iex
 ```
 
-### 2. Clone and switch to the branch
+### 2. Switch to a new branch
 
 ```bash
-git clone https://github.com/HealthyPear/pitztal-ice-news-monitor.git
-cd pitztal-ice-news-monitor
-git checkout copilot/add-telegram-notifications
+git switch -c use/a/meaningful/name
 ```
 
 ### 3. Install the environment
@@ -98,7 +55,7 @@ pixi install
 
 This resolves all dependencies and creates an isolated environment under `.pixi/`.
 
-### 4. Run the unit tests (no credentials needed)
+### 4. Run the current unit tests (no credentials needed)
 
 ```bash
 pixi run -e dev test
@@ -106,15 +63,17 @@ pixi run -e dev test
 
 All 25 tests mock external I/O, so they run fully offline and require no Telegram token or internet access.
 
-### 5. Run the monitor script with real Telegram credentials
+### 5. Run the monitor script locally
 
 ```bash
-# macOS / Linux
-TELEGRAM_BOT_TOKEN=<your-token> TELEGRAM_CHAT_ID=<your-chat-id> pixi run monitor
+# Preview only (no Telegram)
+pixi run monitor --no-telegram
 
-# Windows PowerShell
-$env:TELEGRAM_BOT_TOKEN="<your-token>"; $env:TELEGRAM_CHAT_ID="<your-chat-id>"; pixi run monitor
+# Full run with Telegram (requires .env credentials)
+pixi run monitor
 ```
+
+
 
 > **Tip – force a notification on the first run:**
 > The script only sends a message when the latest item differs from what is stored in
@@ -131,10 +90,12 @@ $env:TELEGRAM_BOT_TOKEN="<your-token>"; $env:TELEGRAM_CHAT_ID="<your-chat-id>"; 
 1. `monitor_news.py` fetches the news page and parses all news items.
 2. It loads `data/last_seen.json` and compares the latest item's title/snippet with the stored value.
 3. If a new item is detected:
-   - The title and snippet are translated from German to English.
-   - A Telegram message is sent.
-   - `data/last_seen.json` is updated and committed back to the repository by the workflow.
+   - The title and snippet are translated from German to English (in chunks to handle long text).
+   - A Telegram message is sent (split into multiple messages if needed).
+   - `data/last_seen.json` is updated.
 4. If nothing changed, the script exits quietly.
+
+When run via GitHub Actions, the state is cached between runs so duplicate notifications are avoided.
 
 ---
 
@@ -148,4 +109,5 @@ All dependencies are declared in `pixi.toml`.
 | `beautifulsoup4` | HTML parsing |
 | `lxml` | Fast HTML/XML parser backend for BeautifulSoup |
 | `deep-translator` | Free Google Translate wrapper |
+| `python-dotenv` *(optional)* | Load credentials from `.env` file for local testing |
 | `pytest` *(dev)* | Unit testing |
