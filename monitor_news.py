@@ -4,15 +4,19 @@ Fetches the latest news from the Alpine Adventure website, detects new items,
 translates them from German to English, and sends a Telegram notification.
 """
 
+import argparse
+import html
 import json
 import logging
 import os
+import re
 import sys
+from datetime import date
 from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from deep_translator import GoogleTranslator
 from deep_translator.exceptions import (
     RequestError,
@@ -20,9 +24,17 @@ from deep_translator.exceptions import (
     TranslationNotFound,
 )
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dependency for local testing
+    load_dotenv = None
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
+if load_dotenv:
+    load_dotenv()
 
 NEWS_URL = (
     "https://www.alpine-adventure.at/de/alpine-adventure/alpine-adventure/news.html"
@@ -47,6 +59,71 @@ logger = logging.getLogger(__name__)
 # Scraping
 # ---------------------------------------------------------------------------
 
+def _clean_header_text(text: str) -> str:
+    """Normalize accordion header text by removing icon labels."""
+    if not text:
+        return ""
+    cleaned = re.sub(r"\b(keyboard_arrow_right|terrain)\b", "", text)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _extract_date_from_title(title: str) -> date | None:
+    """Parse a date from a header like 'Ice News 22.02.2026'."""
+    if not title:
+        return None
+    match = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})", title)
+    if not match:
+        return None
+    day, month, year = (int(part) for part in match.groups())
+    if year < 100:
+        year += 2000
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _extract_collapsible_items(root: Tag, base_url: str) -> list[dict]:
+    """Extract items from the first accordion-style news list."""
+    accordion = None
+    for heading in root.find_all(["h2", "h3"]):
+        heading_text = heading.get_text(" ", strip=True)
+        if heading_text.lower().startswith("ice news"):
+            accordion = heading.find_next("ul", class_="collapsible")
+            if accordion:
+                break
+
+    if not accordion:
+        accordion = root.find("ul", class_="collapsible")
+
+    if not accordion:
+        return []
+
+    items = []
+    for entry in accordion.find_all("li", recursive=False):
+        header = entry.select_one(".collapsible-header")
+        body = entry.select_one(".collapsible-body")
+
+        title = _clean_header_text(header.get_text(" ", strip=True)) if header else ""
+        paragraphs = []
+        if body:
+            for para in body.find_all("p"):
+                text = para.get_text(" ", strip=True)
+                if text:
+                    paragraphs.append(text)
+        snippet = "\n\n".join(paragraphs).strip()
+
+        item_date = _extract_date_from_title(title)
+        item = {"title": title, "snippet": snippet, "link": base_url, "date": item_date}
+        if item["title"] or item["snippet"]:
+            items.append(item)
+
+    items.sort(key=lambda item: item.get("date") or date.min, reverse=True)
+    for item in items:
+        item.pop("date", None)
+    return items
+
+
 def fetch_news(url: str = NEWS_URL) -> list[dict]:
     """Fetch and parse news items from the Alpine Adventure news page.
 
@@ -58,6 +135,12 @@ def fetch_news(url: str = NEWS_URL) -> list[dict]:
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
+
+    root: Tag = soup
+    collapsible_items = _extract_collapsible_items(root, url)
+    if collapsible_items:
+        return collapsible_items
+
     items = []
 
     # The page uses <article> elements or generic news-list containers.
@@ -155,6 +238,43 @@ def translate_to_english(text: str) -> str:
         return text
 
 
+def translate_long_text(text: str, max_chunk_size: int = 4500) -> str:
+    """Translate long text by splitting into chunks to avoid length limits.
+    
+    Splits text by paragraphs and translates each chunk separately.
+    """
+    if not text:
+        return text
+    
+    if len(text) <= max_chunk_size:
+        return translate_to_english(text)
+    
+    # Split by paragraphs
+    paragraphs = text.split('\n\n')
+    translated: list[str] = []
+    current_chunk: list[str] = []
+    current_size = 0
+    
+    for para in paragraphs:
+        para_size = len(para)
+        if current_size + para_size > max_chunk_size and current_chunk:
+            # Translate accumulated chunk
+            chunk_text = '\n\n'.join(current_chunk)
+            translated.append(translate_to_english(chunk_text))
+            current_chunk = [para]
+            current_size = para_size
+        else:
+            current_chunk.append(para)
+            current_size += para_size + 2  # +2 for \n\n
+    
+    # Translate remaining chunk
+    if current_chunk:
+        chunk_text = '\n\n'.join(current_chunk)
+        translated.append(translate_to_english(chunk_text))
+    
+    return '\n\n'.join(translated)
+
+
 # ---------------------------------------------------------------------------
 # Telegram notification
 # ---------------------------------------------------------------------------
@@ -176,8 +296,64 @@ def send_telegram_message(message: str) -> None:
         "disable_web_page_preview": False,
     }
     response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    logger.info("Telegram notification sent successfully.")
+    try:
+        response.raise_for_status()
+    except requests.HTTPError:
+        logger.error("Telegram API error response: %s", response.text)
+        raise
+
+
+def _split_message_into_chunks(message: str, title: str, max_length: int = 4000) -> list[str]:
+    """Split a message into Telegram-sized chunks with headers.
+    
+    Each chunk after the first will be prefixed with "TITLE - part N".
+    """
+    if len(message) <= max_length:
+        return [message]
+    
+    chunks: list[str] = []
+    lines = message.split('\n')
+    current_chunk: list[str] = []
+    current_length = 0
+    
+    for line in lines:
+        line_length = len(line) + 1  # +1 for newline
+        if current_length + line_length > max_length and current_chunk:
+            chunks.append('\n'.join(current_chunk))
+            current_chunk = [line]
+            current_length = line_length
+        else:
+            current_chunk.append(line)
+            current_length += line_length
+    
+    # Add remaining lines
+    if current_chunk:
+        chunks.append('\n'.join(current_chunk))
+    
+    # Add headers to subsequent chunks
+    for i in range(1, len(chunks)):
+        header = f"<b>{html.escape(title)} - part {i + 1}</b>\n\n"
+        chunks[i] = header + chunks[i]
+    
+    return chunks
+
+
+def send_telegram_messages(item: dict, message: str) -> None:
+    """Send message to Telegram, splitting into multiple messages if needed."""
+    title = item.get("title", "News Update")
+    chunks = _split_message_into_chunks(message, title)
+    
+    for i, chunk in enumerate(chunks):
+        send_telegram_message(chunk)
+        if i < len(chunks) - 1:
+            # Small delay between messages to maintain order
+            import time
+            time.sleep(0.5)
+    
+    if len(chunks) > 1:
+        logger.info("Telegram notification sent successfully (%d parts).", len(chunks))
+    else:
+        logger.info("Telegram notification sent successfully.")
 
 
 def build_message(item: dict) -> str:
@@ -186,17 +362,22 @@ def build_message(item: dict) -> str:
     snippet_de = item.get("snippet", "")
     link = item.get("link", "")
 
+    # Translate using chunked translation to handle long text
     title_en = translate_to_english(title_de)
-    snippet_en = translate_to_english(snippet_de)
+    snippet_en = translate_long_text(snippet_de)
+
+    title_de_safe = html.escape(title_de)
+    title_en_safe = html.escape(title_en)
+    snippet_en_safe = html.escape(snippet_en)
 
     lines = ["🏔 <b>Pitztal Ice – New Update!</b>", ""]
-    if title_en:
-        lines.append(f"<b>{title_en}</b>")
-        if title_de and title_de != title_en:
-            lines.append(f"<i>(Original: {title_de})</i>")
+    if title_en_safe:
+        lines.append(f"<b>{title_en_safe}</b>")
+        if title_de_safe and title_de_safe != title_en_safe:
+            lines.append(f"<i>(Original: {title_de_safe})</i>")
         lines.append("")
-    if snippet_en:
-        lines.append(snippet_en)
+    if snippet_en_safe:
+        lines.append(snippet_en_safe)
         lines.append("")
     if link:
         lines.append(f'<a href="{link}">Read more</a>')
@@ -204,11 +385,24 @@ def build_message(item: dict) -> str:
     return "\n".join(lines).strip()
 
 
+def _strip_html(text: str) -> str:
+    """Remove HTML tags for plain-text terminal output."""
+    return re.sub(r"<[^>]+>", "", text)
+
+
+def print_preview(message: str) -> None:
+    """Print a plain-text preview of *message* to the terminal."""
+    separator = "-" * 60
+    print(separator)
+    print(_strip_html(message))
+    print(separator)
+
+
 # ---------------------------------------------------------------------------
 # Main entry-point
 # ---------------------------------------------------------------------------
 
-def main() -> None:
+def main(preview: bool = True, telegram: bool = True) -> None:
     items = fetch_news()
     if not items:
         logger.info("No news items retrieved. Nothing to do.")
@@ -217,18 +411,55 @@ def main() -> None:
     latest = items[0]
     last_seen = load_last_seen()
 
-    if is_new(latest, last_seen):
-        logger.info("New news item detected: %s", latest.get("title"))
-        message = build_message(latest)
-        send_telegram_message(message)
-        save_last_seen(latest)
-    else:
-        logger.info("No new news items. Latest item already seen.")
+    if not is_new(latest, last_seen):
+        logger.info("Latest news already pulled. No new updates available.")
+        return
+
+    logger.info("New update detected!")
+    message = build_message(latest)
+    if preview:
+        print_preview(message)
+    if telegram:
+        send_telegram_messages(latest, message)
+
+    save_last_seen(latest)
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Pitztal Ice News Monitor")
+    parser.add_argument(
+        "--preview",
+        dest="preview",
+        action="store_true",
+        default=True,
+        help="Print translated preview to the terminal (default).",
+    )
+    parser.add_argument(
+        "--no-preview",
+        dest="preview",
+        action="store_false",
+        help="Disable terminal preview output.",
+    )
+    parser.add_argument(
+        "--telegram",
+        dest="telegram",
+        action="store_true",
+        default=True,
+        help="Send Telegram notification when configured (default).",
+    )
+    parser.add_argument(
+        "--no-telegram",
+        dest="telegram",
+        action="store_false",
+        help="Disable Telegram notification sending.",
+    )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
     try:
-        main()
+        args = _parse_args()
+        main(preview=args.preview, telegram=args.telegram)
     except requests.HTTPError as exc:
         logger.error("HTTP error: %s", exc)
         sys.exit(1)
