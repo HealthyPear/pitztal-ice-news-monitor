@@ -115,11 +115,66 @@ def test_translate_falls_back_on_unexpected_error():
 
 
 # ---------------------------------------------------------------------------
+# translate_long_text
+# ---------------------------------------------------------------------------
+
+def test_translate_long_text_short_text():
+    """Short text should use regular translation without chunking."""
+    with patch("monitor_news.translate_to_english", return_value="Hello") as mock_translate:
+        result = monitor_news.translate_long_text("Hallo")
+    assert result == "Hello"
+    mock_translate.assert_called_once_with("Hallo")
+
+
+def test_translate_long_text_chunks_long_text():
+    """Long text should be chunked and translated separately."""
+    # Create text > 4500 chars with multiple paragraphs
+    long_text = "\n\n".join(["Para " + str(i) + " " + "x" * 1000 for i in range(6)])
+    
+    with patch("monitor_news.translate_to_english", side_effect=lambda t: t.upper()) as mock_translate:
+        result = monitor_news.translate_long_text(long_text)
+    
+    # Should have called translate multiple times (chunked)
+    assert mock_translate.call_count > 1
+    # Result should be uppercase (our fake translation)
+    assert "PARA" in result
+
+
+# ---------------------------------------------------------------------------
+# _split_message_into_chunks
+# ---------------------------------------------------------------------------
+
+def test_split_message_short_message():
+    """Short message should not be split."""
+    msg = "Short message"
+    chunks = monitor_news._split_message_into_chunks(msg, "Title")
+    assert len(chunks) == 1
+    assert chunks[0] == msg
+
+
+def test_split_message_long_message():
+    """Long message should be split with headers."""
+    # Create a message > 4000 chars
+    msg = "Line\n" * 500  # 2500 chars
+    chunks = monitor_news._split_message_into_chunks(msg, "Test Title", max_length=1000)
+    
+    assert len(chunks) > 1
+    # First chunk should not have header added
+    assert chunks[0].startswith("Line")
+    # Subsequent chunks should have headers
+    for i in range(1, len(chunks)):
+        assert f"Test Title - part {i + 1}" in chunks[i]
+
+
+# ---------------------------------------------------------------------------
 # build_message
 # ---------------------------------------------------------------------------
 
 def test_build_message_contains_header():
-    with patch("monitor_news.translate_to_english", side_effect=lambda t: t):
+    with (
+        patch("monitor_news.translate_to_english", side_effect=lambda t: t),
+        patch("monitor_news.translate_long_text", side_effect=lambda t: t),
+    ):
         msg = monitor_news.build_message({"title": "T", "snippet": "S", "link": "https://x.com"})
     assert "Pitztal Ice" in msg
     assert "<b>T</b>" in msg
@@ -131,20 +186,29 @@ def test_build_message_shows_original_when_translated():
     def fake_translate(text):
         return "English" if text == "Deutsch" else text
 
-    with patch("monitor_news.translate_to_english", side_effect=fake_translate):
+    with (
+        patch("monitor_news.translate_to_english", side_effect=fake_translate),
+        patch("monitor_news.translate_long_text", side_effect=lambda t: t),
+    ):
         msg = monitor_news.build_message({"title": "Deutsch", "snippet": "", "link": ""})
     assert "<b>English</b>" in msg
     assert "<i>(Original: Deutsch)</i>" in msg
 
 
 def test_build_message_no_original_when_same():
-    with patch("monitor_news.translate_to_english", side_effect=lambda t: t):
+    with (
+        patch("monitor_news.translate_to_english", side_effect=lambda t: t),
+        patch("monitor_news.translate_long_text", side_effect=lambda t: t),
+    ):
         msg = monitor_news.build_message({"title": "Same", "snippet": "", "link": ""})
     assert "(Original:" not in msg
 
 
 def test_build_message_empty_item():
-    with patch("monitor_news.translate_to_english", side_effect=lambda t: t):
+    with (
+        patch("monitor_news.translate_to_english", side_effect=lambda t: t),
+        patch("monitor_news.translate_long_text", side_effect=lambda t: t),
+    ):
         msg = monitor_news.build_message({})
     assert "Pitztal Ice" in msg
 
@@ -168,6 +232,25 @@ _SAMPLE_HTML = """
 </body></html>
 """
 
+_COLLAPSIBLE_HTML = """
+<html><body>
+    <h2>Ice News 2025/26</h2>
+    <ul class="collapsible">
+        <li>
+            <div class="collapsible-header"><h3><i class="material-icons left">keyboard_arrow_right</i>Ice News 22.02.2026</h3></div>
+            <div class="collapsible-body">
+                <p>Hallo Leute,</p>
+                <p>Die Strassensperre wird aufgehoben.</p>
+            </div>
+        </li>
+        <li>
+            <div class="collapsible-header"><h3>Ice News 01.11.2025</h3></div>
+            <div class="collapsible-body"><p>Older update.</p></div>
+        </li>
+    </ul>
+</body></html>
+"""
+
 
 def test_fetch_news_parses_articles():
     mock_resp = MagicMock()
@@ -184,6 +267,20 @@ def test_fetch_news_parses_articles():
     assert items[1]["link"] == "https://example.com/2"
 
 
+def test_fetch_news_parses_collapsible_list():
+    mock_resp = MagicMock()
+    mock_resp.text = _COLLAPSIBLE_HTML
+    mock_resp.raise_for_status.return_value = None
+
+    with patch("monitor_news.requests.get", return_value=mock_resp):
+        items = monitor_news.fetch_news("https://example.com/news")
+
+    assert len(items) == 2
+    assert items[0]["title"] == "Ice News 22.02.2026"
+    assert "Hallo Leute" in items[0]["snippet"]
+    assert items[1]["title"] == "Ice News 01.11.2025"
+
+
 def test_fetch_news_empty_page():
     mock_resp = MagicMock()
     mock_resp.text = "<html><body></body></html>"
@@ -196,73 +293,74 @@ def test_fetch_news_empty_page():
 
 
 # ---------------------------------------------------------------------------
-# send_telegram_message
-# ---------------------------------------------------------------------------
-
-def test_send_telegram_skips_when_no_token(monkeypatch):
-    monkeypatch.setattr(monitor_news, "TELEGRAM_BOT_TOKEN", "")
-    monkeypatch.setattr(monitor_news, "TELEGRAM_CHAT_ID", "123")
-    with patch("monitor_news.requests.post") as mock_post:
-        monitor_news.send_telegram_message("hello")
-    mock_post.assert_not_called()
-
-
-def test_send_telegram_posts_message(monkeypatch):
-    monkeypatch.setattr(monitor_news, "TELEGRAM_BOT_TOKEN", "tok")
-    monkeypatch.setattr(monitor_news, "TELEGRAM_CHAT_ID", "123")
-    mock_resp = MagicMock()
-    mock_resp.raise_for_status.return_value = None
-
-    with patch("monitor_news.requests.post", return_value=mock_resp) as mock_post:
-        monitor_news.send_telegram_message("hello")
-
-    mock_post.assert_called_once()
-    _, kwargs = mock_post.call_args
-    assert kwargs["json"]["text"] == "hello"
-    assert kwargs["json"]["chat_id"] == "123"
-
-
-# ---------------------------------------------------------------------------
 # main (integration-style with all I/O mocked)
 # ---------------------------------------------------------------------------
 
-def test_main_sends_notification_for_new_item(tmp_path, monkeypatch):
-    monkeypatch.setattr(monitor_news, "LAST_SEEN_FILE", tmp_path / "last_seen.json")
-    monkeypatch.setattr(monitor_news, "TELEGRAM_BOT_TOKEN", "tok")
-    monkeypatch.setattr(monitor_news, "TELEGRAM_CHAT_ID", "123")
-
+def test_main_prints_preview_for_latest_item(capsys):
     item = {"title": "New", "snippet": "Snip", "link": "https://x.com"}
 
     with (
         patch("monitor_news.fetch_news", return_value=[item]),
         patch("monitor_news.translate_to_english", side_effect=lambda t: t),
-        patch("monitor_news.requests.post", return_value=MagicMock(raise_for_status=lambda: None)) as mock_post,
+        patch("monitor_news.translate_long_text", side_effect=lambda t: t),
+        patch("monitor_news.load_last_seen", return_value={}),
+        patch("monitor_news.send_telegram_messages"),
+        patch("monitor_news.save_last_seen"),
     ):
         monitor_news.main()
 
-    mock_post.assert_called_once()
-    assert monitor_news.load_last_seen() == item
-
-
-def test_main_no_notification_for_seen_item(tmp_path, monkeypatch):
-    item = {"title": "Old", "snippet": "Snip", "link": "https://x.com"}
-    monkeypatch.setattr(monitor_news, "LAST_SEEN_FILE", tmp_path / "last_seen.json")
-    monitor_news.save_last_seen(item)
-
-    with (
-        patch("monitor_news.fetch_news", return_value=[item]),
-        patch("monitor_news.requests.post") as mock_post,
-    ):
-        monitor_news.main()
-
-    mock_post.assert_not_called()
+    captured = capsys.readouterr()
+    assert "New" in captured.out
+    assert "Snip" in captured.out
+    assert "<b>" not in captured.out
 
 
 def test_main_no_items(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor_news, "LAST_SEEN_FILE", tmp_path / "last_seen.json")
     with (
         patch("monitor_news.fetch_news", return_value=[]),
-        patch("monitor_news.requests.post") as mock_post,
     ):
         monitor_news.main()
-    mock_post.assert_not_called()
+
+
+def test_main_new_item_sends_and_saves(tmp_path, monkeypatch, capsys):
+    """Test that a new item triggers notification and gets saved."""
+    monkeypatch.setattr(monitor_news, "LAST_SEEN_FILE", tmp_path / "last_seen.json")
+    item = {"title": "New News", "snippet": "Fresh content", "link": "https://x.com"}
+    last_seen = {"title": "Old News", "snippet": "Old content", "link": "https://x.com"}
+
+    with (
+        patch("monitor_news.fetch_news", return_value=[item]),
+        patch("monitor_news.translate_to_english", side_effect=lambda t: t),
+        patch("monitor_news.translate_long_text", side_effect=lambda t: t),
+        patch("monitor_news.load_last_seen", return_value=last_seen),
+        patch("monitor_news.send_telegram_messages") as mock_telegram,
+        patch("monitor_news.save_last_seen") as mock_save,
+    ):
+        monitor_news.main(preview=True, telegram=True)
+
+    # Should send telegram and save
+    mock_telegram.assert_called_once()
+    mock_save.assert_called_once_with(item)
+
+    # Should show preview
+    captured = capsys.readouterr()
+    assert "New News" in captured.out
+
+
+def test_main_already_pulled_skips_notification(tmp_path, monkeypatch, capsys):
+    """Test that an already-seen item does not trigger notification."""
+    monkeypatch.setattr(monitor_news, "LAST_SEEN_FILE", tmp_path / "last_seen.json")
+    item = {"title": "Same News", "snippet": "Same content", "link": "https://x.com"}
+
+    with (
+        patch("monitor_news.fetch_news", return_value=[item]),
+        patch("monitor_news.load_last_seen", return_value=item),
+        patch("monitor_news.send_telegram_messages") as mock_telegram,
+        patch("monitor_news.save_last_seen") as mock_save,
+    ):
+        monitor_news.main(preview=True, telegram=True)
+
+    # Should NOT send telegram or save
+    mock_telegram.assert_not_called()
+    mock_save.assert_not_called()
