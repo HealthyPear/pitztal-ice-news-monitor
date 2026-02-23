@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 # Scraping
 # ---------------------------------------------------------------------------
 
+
 def _clean_header_text(text: str) -> str:
     """Normalize accordion header text by removing icon labels."""
     if not text:
@@ -154,9 +155,8 @@ def fetch_news(url: str = NEWS_URL) -> list[dict]:
     )
 
     for article in candidates:
-        title_tag = (
-            article.find(["h1", "h2", "h3", "h4"])
-            or article.find(class_=lambda c: c and "title" in c.lower())
+        title_tag = article.find(["h1", "h2", "h3", "h4"]) or article.find(
+            class_=lambda c: c and "title" in c.lower()
         )
         title = title_tag.get_text(strip=True) if title_tag else ""
 
@@ -182,6 +182,7 @@ def fetch_news(url: str = NEWS_URL) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Change detection
 # ---------------------------------------------------------------------------
+
 
 def load_last_seen() -> dict:
     """Load the last-seen news item from disk."""
@@ -213,6 +214,7 @@ def is_new(item: dict, last_seen: dict) -> bool:
 # Translation
 # ---------------------------------------------------------------------------
 
+
 def translate_to_english(text: str) -> str:
     """Translate *text* from German to English using Google Translate.
 
@@ -239,41 +241,42 @@ def translate_to_english(text: str) -> str:
 
 def translate_long_text(text: str, max_chunk_size: int = 4500) -> str:
     """Translate long text by splitting into chunks to avoid length limits.
-    
+
     Splits text by paragraphs and translates each chunk separately.
     """
     if not text:
         return text
-    
+
     if len(text) <= max_chunk_size:
         return translate_to_english(text)
-    
-    paragraphs = text.split('\n\n')
+
+    paragraphs = text.split("\n\n")
     translated: list[str] = []
     current_chunk: list[str] = []
     current_size = 0
-    
+
     for para in paragraphs:
         para_size = len(para)
         if current_size + para_size > max_chunk_size and current_chunk:
-            chunk_text = '\n\n'.join(current_chunk)
+            chunk_text = "\n\n".join(current_chunk)
             translated.append(translate_to_english(chunk_text))
             current_chunk = [para]
             current_size = para_size
         else:
             current_chunk.append(para)
             current_size += para_size + 2
-    
+
     if current_chunk:
-        chunk_text = '\n\n'.join(current_chunk)
+        chunk_text = "\n\n".join(current_chunk)
         translated.append(translate_to_english(chunk_text))
-    
-    return '\n\n'.join(translated)
+
+    return "\n\n".join(translated)
 
 
 # ---------------------------------------------------------------------------
 # Telegram notification
 # ---------------------------------------------------------------------------
+
 
 def send_telegram_message(message: str) -> None:
     """Send a message to the configured Telegram chat.
@@ -306,36 +309,38 @@ def send_telegram_message(message: str) -> None:
         raise
 
 
-def _split_message_into_chunks(message: str, title: str, max_length: int = 4000) -> list[str]:
+def _split_message_into_chunks(
+    message: str, title: str, max_length: int = 4000
+) -> list[str]:
     """Split a message into Telegram-sized chunks with headers.
-    
+
     Each chunk after the first will be prefixed with "TITLE - part N".
     """
     if len(message) <= max_length:
         return [message]
-    
+
     chunks: list[str] = []
-    lines = message.split('\n')
+    lines = message.split("\n")
     current_chunk: list[str] = []
     current_length = 0
-    
+
     for line in lines:
         line_length = len(line) + 1
         if current_length + line_length > max_length and current_chunk:
-            chunks.append('\n'.join(current_chunk))
+            chunks.append("\n".join(current_chunk))
             current_chunk = [line]
             current_length = line_length
         else:
             current_chunk.append(line)
             current_length += line_length
-    
+
     if current_chunk:
-        chunks.append('\n'.join(current_chunk))
-    
+        chunks.append("\n".join(current_chunk))
+
     for i in range(1, len(chunks)):
         header = f"<b>{html.escape(title)} - part {i + 1}</b>\n\n"
         chunks[i] = header + chunks[i]
-    
+
     return chunks
 
 
@@ -343,14 +348,15 @@ def send_telegram_messages(item: dict, message: str) -> None:
     """Send message to Telegram, splitting into multiple messages if needed."""
     title = item.get("title", "News Update")
     chunks = _split_message_into_chunks(message, title)
-    
+
     for i, chunk in enumerate(chunks):
         send_telegram_message(chunk)
         if i < len(chunks) - 1:
             # Small delay between messages to maintain order
             import time
+
             time.sleep(0.5)
-    
+
     if len(chunks) > 1:
         logger.info("Telegram notification sent successfully (%d parts).", len(chunks))
     else:
@@ -411,6 +417,7 @@ def print_preview(message: str) -> None:
 # ---------------------------------------------------------------------------
 # Main entry-point
 # ---------------------------------------------------------------------------
+
 
 def main(preview: bool = True, telegram: bool = True) -> None:
     """Fetch news, detect changes, and send notifications.

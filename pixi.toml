@@ -17,9 +17,13 @@ python-dotenv = ">=1.0.1,<2"
 
 [feature.dev.pypi-dependencies]
 pytest = ">=8.3.5,<9"
+pre-commit = ">=3.6.0,<4"
+mypy = ">=1.8.0,<2"
 
 [feature.dev.tasks]
 test = "pytest tests/ -v"
+pre-commit-install = "pre-commit install"
+pre-commit-run = "pre-commit run --all-files"
 
 [environments]
 default = { features = [], solve-group = "default" }
