@@ -7,7 +7,6 @@ tests run fully offline without real credentials.
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 import monitor_news
 
@@ -15,6 +14,7 @@ import monitor_news
 # ---------------------------------------------------------------------------
 # is_new
 # ---------------------------------------------------------------------------
+
 
 def test_is_new_empty_last_seen():
     assert monitor_news.is_new({"title": "News"}, {}) is True
@@ -26,16 +26,27 @@ def test_is_new_same_item():
 
 
 def test_is_new_changed_title():
-    assert monitor_news.is_new({"title": "B", "snippet": "x"}, {"title": "A", "snippet": "x"}) is True
+    assert (
+        monitor_news.is_new(
+            {"title": "B", "snippet": "x"}, {"title": "A", "snippet": "x"}
+        )
+        is True
+    )
 
 
 def test_is_new_changed_snippet():
-    assert monitor_news.is_new({"title": "A", "snippet": "new"}, {"title": "A", "snippet": "old"}) is True
+    assert (
+        monitor_news.is_new(
+            {"title": "A", "snippet": "new"}, {"title": "A", "snippet": "old"}
+        )
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------
 # load_last_seen / save_last_seen
 # ---------------------------------------------------------------------------
+
 
 def test_load_last_seen_missing_file(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor_news, "LAST_SEEN_FILE", tmp_path / "last_seen.json")
@@ -68,6 +79,7 @@ def test_save_and_reload(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # translate_to_english
 # ---------------------------------------------------------------------------
+
 
 def test_translate_empty_string():
     assert monitor_news.translate_to_english("") == ""
@@ -118,9 +130,12 @@ def test_translate_falls_back_on_unexpected_error():
 # translate_long_text
 # ---------------------------------------------------------------------------
 
+
 def test_translate_long_text_short_text():
     """Short text should use regular translation without chunking."""
-    with patch("monitor_news.translate_to_english", return_value="Hello") as mock_translate:
+    with patch(
+        "monitor_news.translate_to_english", return_value="Hello"
+    ) as mock_translate:
         result = monitor_news.translate_long_text("Hallo")
     assert result == "Hello"
     mock_translate.assert_called_once_with("Hallo")
@@ -130,10 +145,12 @@ def test_translate_long_text_chunks_long_text():
     """Long text should be chunked and translated separately."""
     # Create text > 4500 chars with multiple paragraphs
     long_text = "\n\n".join(["Para " + str(i) + " " + "x" * 1000 for i in range(6)])
-    
-    with patch("monitor_news.translate_to_english", side_effect=lambda t: t.upper()) as mock_translate:
+
+    with patch(
+        "monitor_news.translate_to_english", side_effect=lambda t: t.upper()
+    ) as mock_translate:
         result = monitor_news.translate_long_text(long_text)
-    
+
     # Should have called translate multiple times (chunked)
     assert mock_translate.call_count > 1
     # Result should be uppercase (our fake translation)
@@ -143,6 +160,7 @@ def test_translate_long_text_chunks_long_text():
 # ---------------------------------------------------------------------------
 # _split_message_into_chunks
 # ---------------------------------------------------------------------------
+
 
 def test_split_message_short_message():
     """Short message should not be split."""
@@ -157,7 +175,7 @@ def test_split_message_long_message():
     # Create a message > 4000 chars
     msg = "Line\n" * 500  # 2500 chars
     chunks = monitor_news._split_message_into_chunks(msg, "Test Title", max_length=1000)
-    
+
     assert len(chunks) > 1
     # First chunk should not have header added
     assert chunks[0].startswith("Line")
@@ -170,12 +188,15 @@ def test_split_message_long_message():
 # build_message
 # ---------------------------------------------------------------------------
 
+
 def test_build_message_contains_header():
     with (
         patch("monitor_news.translate_to_english", side_effect=lambda t: t),
         patch("monitor_news.translate_long_text", side_effect=lambda t: t),
     ):
-        msg = monitor_news.build_message({"title": "T", "snippet": "S", "link": "https://x.com"})
+        msg = monitor_news.build_message(
+            {"title": "T", "snippet": "S", "link": "https://x.com"}
+        )
     assert "Pitztal Ice" in msg
     assert "<b>T</b>" in msg
     assert "S" in msg
@@ -190,7 +211,9 @@ def test_build_message_shows_original_when_translated():
         patch("monitor_news.translate_to_english", side_effect=fake_translate),
         patch("monitor_news.translate_long_text", side_effect=lambda t: t),
     ):
-        msg = monitor_news.build_message({"title": "Deutsch", "snippet": "", "link": ""})
+        msg = monitor_news.build_message(
+            {"title": "Deutsch", "snippet": "", "link": ""}
+        )
     assert "<b>English</b>" in msg
     assert "<i>(Original: Deutsch)</i>" in msg
 
@@ -322,6 +345,7 @@ def test_fetch_news_empty_page():
 # ---------------------------------------------------------------------------
 # main (integration-style with all I/O mocked)
 # ---------------------------------------------------------------------------
+
 
 def test_main_prints_preview_for_latest_item(capsys):
     item = {"title": "New", "snippet": "Snip", "link": "https://x.com"}

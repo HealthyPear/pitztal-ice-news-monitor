@@ -22,5 +22,8 @@ jobs:
         with:
           environments: dev
 
+      - name: Run pre-commit checks
+        run: pixi run -e dev pre-commit-run
+
       - name: Run tests
         run: pixi run -e dev test
