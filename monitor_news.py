@@ -280,7 +280,14 @@ def translate_long_text(text: str, max_chunk_size: int = 4500) -> str:
 # ---------------------------------------------------------------------------
 
 def send_telegram_message(message: str) -> None:
-    """Send *message* to the configured Telegram chat."""
+    """Send a message to the configured Telegram chat.
+
+    Args:
+        message: HTML-formatted text to send.
+
+    Raises:
+        requests.HTTPError: If the Telegram API returns an error.
+    """
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.error(
             "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is not set. "
@@ -357,7 +364,17 @@ def send_telegram_messages(item: dict, message: str) -> None:
 
 
 def build_message(item: dict) -> str:
-    """Format a Telegram notification message for *item*."""
+    """Format a Telegram notification message for a news item.
+
+    Translates the title and snippet, applies HTML escaping, and formats
+    the message with icons, bold text, and a link.
+
+    Args:
+        item: Dictionary with keys 'title', 'snippet', and 'link'.
+
+    Returns:
+        HTML-formatted notification message string.
+    """
     title_de = item.get("title", "")
     snippet_de = item.get("snippet", "")
     link = item.get("link", "")
@@ -403,6 +420,12 @@ def print_preview(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main(preview: bool = True, telegram: bool = True) -> None:
+    """Fetch news, detect changes, and send notifications.
+
+    Args:
+        preview: If True, print translated preview to terminal.
+        telegram: If True, send notification via Telegram.
+    """
     items = fetch_news()
     if not items:
         logger.info("No news items retrieved. Nothing to do.")
@@ -426,6 +449,11 @@ def main(preview: bool = True, telegram: bool = True) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Returns:
+        Namespace with 'preview' and 'telegram' boolean flags.
+    """
     parser = argparse.ArgumentParser(description="Pitztal Ice News Monitor")
     parser.add_argument(
         "--preview",
