@@ -34,3 +34,6 @@ htmlcov/
 
 # Local env files
 .env
+
+# Runtime state (should be persisted separately in CI/CD)
+data/last_seen.json
