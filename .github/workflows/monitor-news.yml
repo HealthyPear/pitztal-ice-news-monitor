@@ -11,9 +11,6 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write  # needed to commit updated last_seen.json
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -23,16 +20,23 @@ jobs:
         with:
           environments: default
 
+      - name: Restore last seen state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/last_seen.json
+          key: last-seen-${{ github.run_id }}
+          restore-keys: |
+            last-seen-
+
       - name: Run news monitor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: pixi run monitor
 
-      - name: Commit updated last_seen.json (if changed)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/last_seen.json
-          git diff --cached --quiet || git commit -m "chore: update last_seen.json [skip ci]"
-          git push
+      - name: Save last seen state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data/last_seen.json
+          key: last-seen-${{ github.run_id }}
