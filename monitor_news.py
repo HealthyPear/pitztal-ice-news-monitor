@@ -160,7 +160,6 @@ def fetch_news(url: str = NEWS_URL) -> list[dict]:
         )
         title = title_tag.get_text(strip=True) if title_tag else ""
 
-        # Snippet: first paragraph or dedicated summary element
         snippet_tag = article.find("p") or article.find(
             class_=lambda c: c and ("teaser" in c.lower() or "summary" in c.lower())
         )
@@ -249,7 +248,6 @@ def translate_long_text(text: str, max_chunk_size: int = 4500) -> str:
     if len(text) <= max_chunk_size:
         return translate_to_english(text)
     
-    # Split by paragraphs
     paragraphs = text.split('\n\n')
     translated: list[str] = []
     current_chunk: list[str] = []
@@ -258,16 +256,14 @@ def translate_long_text(text: str, max_chunk_size: int = 4500) -> str:
     for para in paragraphs:
         para_size = len(para)
         if current_size + para_size > max_chunk_size and current_chunk:
-            # Translate accumulated chunk
             chunk_text = '\n\n'.join(current_chunk)
             translated.append(translate_to_english(chunk_text))
             current_chunk = [para]
             current_size = para_size
         else:
             current_chunk.append(para)
-            current_size += para_size + 2  # +2 for \n\n
+            current_size += para_size + 2
     
-    # Translate remaining chunk
     if current_chunk:
         chunk_text = '\n\n'.join(current_chunk)
         translated.append(translate_to_english(chunk_text))
@@ -324,7 +320,7 @@ def _split_message_into_chunks(message: str, title: str, max_length: int = 4000)
     current_length = 0
     
     for line in lines:
-        line_length = len(line) + 1  # +1 for newline
+        line_length = len(line) + 1
         if current_length + line_length > max_length and current_chunk:
             chunks.append('\n'.join(current_chunk))
             current_chunk = [line]
@@ -333,11 +329,9 @@ def _split_message_into_chunks(message: str, title: str, max_length: int = 4000)
             current_chunk.append(line)
             current_length += line_length
     
-    # Add remaining lines
     if current_chunk:
         chunks.append('\n'.join(current_chunk))
     
-    # Add headers to subsequent chunks
     for i in range(1, len(chunks)):
         header = f"<b>{html.escape(title)} - part {i + 1}</b>\n\n"
         chunks[i] = header + chunks[i]
@@ -379,7 +373,6 @@ def build_message(item: dict) -> str:
     snippet_de = item.get("snippet", "")
     link = item.get("link", "")
 
-    # Translate using chunked translation to handle long text
     title_en = translate_to_english(title_de)
     snippet_en = translate_long_text(snippet_de)
 
