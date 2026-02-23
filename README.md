@@ -1,5 +1,14 @@
 # Pitztal Ice News Monitor
 
+[![CI](https://github.com/HealthyPear/pitztal-ice-news-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/HealthyPear/pitztal-ice-news-monitor/actions/workflows/ci.yml)
+[![Monitoring workflow](https://img.shields.io/github/actions/workflow/status/HealthyPear/pitztal-ice-news-monitor/monitor-news.yml?branch=main&label=Monitoring%20workflow)](https://github.com/HealthyPear/pitztal-ice-news-monitor/actions/workflows/monitor-news.yml)
+[![Python](https://img.shields.io/badge/dynamic/toml?url=https://raw.githubusercontent.com/HealthyPear/pitztal-ice-news-monitor/main/pixi.toml&query=$.dependencies.python&label=python&color=blue)](https://www.python.org/downloads/)
+[![pixi](https://img.shields.io/badge/pixi-enabled-2bb673.svg)](https://pixi.sh/)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Telegram](https://img.shields.io/badge/telegram-channel-2CA5E0?logo=telegram&logoColor=white)](https://t.me/+6rJDCEqZPeQ3N2Vk)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 Automatically monitors the [Alpine Adventure news page](https://www.alpine-adventure.at/de/alpine-adventure/alpine-adventure/news.html) for new Pitztal Ice updates, translates them from German to English, and delivers a Telegram notification.
 
 ---
