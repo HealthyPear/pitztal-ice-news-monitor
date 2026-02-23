@@ -1,3 +1,6 @@
+# Pixi environment (managed by pixi, do not commit)
+.pixi/
+
 # Python
 __pycache__/
 *.py[cod]
