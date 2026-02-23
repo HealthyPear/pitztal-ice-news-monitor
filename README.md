@@ -20,13 +20,19 @@ Automatically monitors the [Alpine Adventure news page](https://www.alpine-adven
 
 ```
 .
-├── .github/workflows/monitor-news.yml  # GitHub Actions workflow (cron + manual trigger)
-├── .gitignore                          # Ignores venvs, caches, build artefacts
-├── requirements.txt                    # Python dependencies
-├── monitor_news.py                     # Main script: scraping, tracking, translating, notifying
-├── README.md                           # This file
-└── data/
-    └── last_seen.json                  # Stores the last-detected news item
+├── .github/
+│   └── workflows/
+│       ├── monitor-news.yml   # Scheduled + manual monitor workflow
+│       └── ci.yml             # CI: runs tests on every push / pull request
+├── .gitignore                 # Ignores venvs, caches, build artefacts
+├── requirements.txt           # Runtime dependencies
+├── requirements-dev.txt       # Development/test dependencies (pytest)
+├── monitor_news.py            # Main script: scraping, tracking, translating, notifying
+├── README.md                  # This file
+├── data/
+│   └── last_seen.json         # Stores the last-detected news item
+└── tests/
+    └── test_monitor_news.py   # Unit tests (all I/O mocked, no credentials needed)
 ```
 
 ---
@@ -63,16 +69,49 @@ using the **"Run workflow"** button.
 
 ---
 
-## Local development
+## Local testing
+
+### 1. Clone and switch to the branch
+
+```bash
+git clone https://github.com/HealthyPear/pitztal-ice-news-monitor.git
+cd pitztal-ice-news-monitor
+git checkout copilot/add-telegram-notifications
+```
+
+### 2. Create a virtual environment and install dependencies
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-# Run with real secrets
-TELEGRAM_BOT_TOKEN=<token> TELEGRAM_CHAT_ID=<chat_id> python monitor_news.py
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt -r requirements-dev.txt
 ```
+
+### 3. Run the unit tests (no credentials needed)
+
+```bash
+pytest tests/ -v
+```
+
+All 25 tests mock external I/O, so they run fully offline and require no Telegram token or internet access.
+
+### 4. Run the monitor script with real Telegram credentials
+
+```bash
+# macOS / Linux
+TELEGRAM_BOT_TOKEN=<your-token> TELEGRAM_CHAT_ID=<your-chat-id> python monitor_news.py
+
+# Windows PowerShell
+$env:TELEGRAM_BOT_TOKEN="<your-token>"; $env:TELEGRAM_CHAT_ID="<your-chat-id>"; python monitor_news.py
+```
+
+> **Tip – force a notification on the first run:**
+> The script only sends a message when the latest item differs from what is stored in
+> `data/last_seen.json`. To guarantee a notification, reset the file before running:
+>
+> ```bash
+> echo '{}' > data/last_seen.json
+> ```
 
 ---
 
