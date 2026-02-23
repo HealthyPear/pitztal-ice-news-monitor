@@ -1,0 +1,28 @@
+[workspace]
+name = "pitztal-ice-news-monitor"
+version = "0.1.0"
+description = "Monitors Pitztal Ice news and sends Telegram notifications"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
+
+[dependencies]
+python = ">=3.12,<3.13"
+
+[pypi-dependencies]
+requests = ">=2.32.3,<3"
+beautifulsoup4 = ">=4.12.3,<5"
+deep-translator = ">=1.11.4,<2"
+lxml = ">=5.3.0,<6"
+
+[feature.dev.pypi-dependencies]
+pytest = ">=8.3.5,<9"
+
+[feature.dev.tasks]
+test = "pytest tests/ -v"
+
+[environments]
+default = { features = [], solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+
+[tasks]
+monitor = "python monitor_news.py"

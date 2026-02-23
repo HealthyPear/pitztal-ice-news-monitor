@@ -24,9 +24,8 @@ Automatically monitors the [Alpine Adventure news page](https://www.alpine-adven
 │   └── workflows/
 │       ├── monitor-news.yml   # Scheduled + manual monitor workflow
 │       └── ci.yml             # CI: runs tests on every push / pull request
-├── .gitignore                 # Ignores venvs, caches, build artefacts
-├── requirements.txt           # Runtime dependencies
-├── requirements-dev.txt       # Development/test dependencies (pytest)
+├── .gitignore                 # Ignores .pixi/, caches, build artefacts
+├── pixi.toml                  # Pixi workspace: dependencies, environments, tasks
 ├── monitor_news.py            # Main script: scraping, tracking, translating, notifying
 ├── README.md                  # This file
 ├── data/
@@ -71,7 +70,19 @@ using the **"Run workflow"** button.
 
 ## Local testing
 
-### 1. Clone and switch to the branch
+### 1. Install pixi
+
+Follow the [official instructions](https://pixi.sh/latest/#installation):
+
+```bash
+# macOS / Linux
+curl -fsSL https://pixi.sh/install.sh | sh
+
+# Windows (PowerShell)
+iwr -useb https://pixi.sh/install.ps1 | iex
+```
+
+### 2. Clone and switch to the branch
 
 ```bash
 git clone https://github.com/HealthyPear/pitztal-ice-news-monitor.git
@@ -79,30 +90,30 @@ cd pitztal-ice-news-monitor
 git checkout copilot/add-telegram-notifications
 ```
 
-### 2. Create a virtual environment and install dependencies
+### 3. Install the environment
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt -r requirements-dev.txt
+pixi install
 ```
 
-### 3. Run the unit tests (no credentials needed)
+This resolves all dependencies and creates an isolated environment under `.pixi/`.
+
+### 4. Run the unit tests (no credentials needed)
 
 ```bash
-pytest tests/ -v
+pixi run -e dev test
 ```
 
 All 25 tests mock external I/O, so they run fully offline and require no Telegram token or internet access.
 
-### 4. Run the monitor script with real Telegram credentials
+### 5. Run the monitor script with real Telegram credentials
 
 ```bash
 # macOS / Linux
-TELEGRAM_BOT_TOKEN=<your-token> TELEGRAM_CHAT_ID=<your-chat-id> python monitor_news.py
+TELEGRAM_BOT_TOKEN=<your-token> TELEGRAM_CHAT_ID=<your-chat-id> pixi run monitor
 
 # Windows PowerShell
-$env:TELEGRAM_BOT_TOKEN="<your-token>"; $env:TELEGRAM_CHAT_ID="<your-chat-id>"; python monitor_news.py
+$env:TELEGRAM_BOT_TOKEN="<your-token>"; $env:TELEGRAM_CHAT_ID="<your-chat-id>"; pixi run monitor
 ```
 
 > **Tip – force a notification on the first run:**
@@ -129,9 +140,12 @@ $env:TELEGRAM_BOT_TOKEN="<your-token>"; $env:TELEGRAM_CHAT_ID="<your-chat-id>"; 
 
 ## Dependencies
 
+All dependencies are declared in `pixi.toml`.
+
 | Package | Purpose |
 |---|---|
 | `requests` | HTTP requests (page fetch + Telegram API) |
 | `beautifulsoup4` | HTML parsing |
 | `lxml` | Fast HTML/XML parser backend for BeautifulSoup |
 | `deep-translator` | Free Google Translate wrapper |
+| `pytest` *(dev)* | Unit testing |
