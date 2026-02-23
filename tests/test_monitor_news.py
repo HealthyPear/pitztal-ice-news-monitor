@@ -281,6 +281,33 @@ def test_fetch_news_parses_collapsible_list():
     assert items[1]["title"] == "Ice News 01.11.2025"
 
 
+def test_fetch_news_preserves_full_title_with_multiple_dates():
+    """Test that full accordion header text is preserved, including complex titles."""
+    html = """
+    <html><body>
+      <ul class="collapsible">
+        <li>
+          <div class="collapsible-header">30.12.2025 Aktualisierung 01.01.2026</div>
+          <div class="collapsible-body">
+            <p>News content here.</p>
+          </div>
+        </li>
+      </ul>
+    </body></html>
+    """
+    mock_resp = MagicMock()
+    mock_resp.text = html
+    mock_resp.raise_for_status.return_value = None
+
+    with patch("monitor_news.requests.get", return_value=mock_resp):
+        items = monitor_news.fetch_news("https://example.com/news")
+
+    assert len(items) == 1
+    # Verify full title is preserved (not just the first date)
+    assert items[0]["title"] == "30.12.2025 Aktualisierung 01.01.2026"
+    assert items[0]["snippet"] == "News content here."
+
+
 def test_fetch_news_empty_page():
     mock_resp = MagicMock()
     mock_resp.text = "<html><body></body></html>"
