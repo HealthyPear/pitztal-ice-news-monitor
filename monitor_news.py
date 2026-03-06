@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import sys
+import time
 from datetime import date
 from pathlib import Path
 from urllib.parse import urljoin
@@ -47,6 +48,11 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 
 REQUEST_TIMEOUT = 30  # seconds
+MAX_RETRIES = 3  # maximum number of fetch attempts
+RETRY_DELAY = 2  # seconds to wait between retries
+
+# HTTP status codes for permanent client errors that should not be retried.
+_NO_RETRY_STATUS_CODES = {400, 401, 403, 404, 405, 410}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -128,12 +134,54 @@ def _extract_collapsible_items(root: Tag, base_url: str) -> list[dict]:
 def fetch_news(url: str = NEWS_URL) -> list[dict]:
     """Fetch and parse news items from the Alpine Adventure news page.
 
+    Retries up to MAX_RETRIES times on transient network or HTTP errors.
+    Permanent client errors (e.g. 404 Not Found) are not retried.
+
     Returns a list of dicts with keys: title, snippet, link.
     The list is ordered newest-first as they appear on the page.
     """
     logger.info("Fetching news from %s", url)
-    response = requests.get(url, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.get(url, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            break
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code in _NO_RETRY_STATUS_CODES:
+                logger.error(
+                    "HTTP %s error (not retrying): %s", status_code, exc
+                )
+                raise
+            if attempt < MAX_RETRIES:
+                logger.warning(
+                    "HTTP error on attempt %d/%d: %s – retrying in %d s…",
+                    attempt,
+                    MAX_RETRIES,
+                    exc,
+                    RETRY_DELAY,
+                )
+                time.sleep(RETRY_DELAY)
+            else:
+                logger.error(
+                    "HTTP error after %d attempts: %s", MAX_RETRIES, exc
+                )
+                raise
+        except requests.RequestException as exc:
+            if attempt < MAX_RETRIES:
+                logger.warning(
+                    "Network error on attempt %d/%d: %s – retrying in %d s…",
+                    attempt,
+                    MAX_RETRIES,
+                    exc,
+                    RETRY_DELAY,
+                )
+                time.sleep(RETRY_DELAY)
+            else:
+                logger.error(
+                    "Network error after %d attempts: %s", MAX_RETRIES, exc
+                )
+                raise
 
     soup = BeautifulSoup(response.text, "html.parser")
 
@@ -353,8 +401,6 @@ def send_telegram_messages(item: dict, message: str) -> None:
         send_telegram_message(chunk)
         if i < len(chunks) - 1:
             # Small delay between messages to maintain order
-            import time
-
             time.sleep(0.5)
 
     if len(chunks) > 1:

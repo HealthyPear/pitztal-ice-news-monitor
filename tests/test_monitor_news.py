@@ -7,6 +7,7 @@ tests run fully offline without real credentials.
 import json
 from unittest.mock import MagicMock, patch
 
+import requests
 
 import monitor_news
 
@@ -340,6 +341,119 @@ def test_fetch_news_empty_page():
         items = monitor_news.fetch_news("https://example.com/news")
 
     assert items == []
+
+
+# ---------------------------------------------------------------------------
+# fetch_news – retry logic
+# ---------------------------------------------------------------------------
+
+
+def _make_http_error(status_code: int) -> requests.HTTPError:
+    """Create a requests.HTTPError with a mock response for the given status code."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    exc = requests.HTTPError(response=mock_resp)
+    return exc
+
+
+def test_fetch_news_retries_on_transient_http_error():
+    """Fetch should succeed on the third attempt after two retryable HTTP errors."""
+    success_resp = MagicMock()
+    success_resp.text = _SAMPLE_HTML
+    success_resp.raise_for_status.return_value = None
+
+    side_effects = [
+        _make_http_error(406),
+        _make_http_error(503),
+        success_resp,
+    ]
+
+    with (
+        patch("monitor_news.requests.get", side_effect=side_effects) as mock_get,
+        patch("monitor_news.time.sleep") as mock_sleep,
+    ):
+        items = monitor_news.fetch_news("https://example.com/news")
+
+    assert mock_get.call_count == 3
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_called_with(monitor_news.RETRY_DELAY)
+    assert len(items) == 2
+
+
+def test_fetch_news_does_not_retry_on_404():
+    """Fetch should raise immediately on a 404 without retrying."""
+    with (
+        patch(
+            "monitor_news.requests.get",
+            side_effect=_make_http_error(404),
+        ) as mock_get,
+        patch("monitor_news.time.sleep") as mock_sleep,
+    ):
+        try:
+            monitor_news.fetch_news("https://example.com/news")
+        except requests.HTTPError:
+            pass
+
+    assert mock_get.call_count == 1
+    mock_sleep.assert_not_called()
+
+
+def test_fetch_news_retries_on_network_error():
+    """Fetch should retry on connection errors and succeed on the second attempt."""
+    success_resp = MagicMock()
+    success_resp.text = _SAMPLE_HTML
+    success_resp.raise_for_status.return_value = None
+
+    side_effects = [
+        requests.ConnectionError("timeout"),
+        success_resp,
+    ]
+
+    with (
+        patch("monitor_news.requests.get", side_effect=side_effects) as mock_get,
+        patch("monitor_news.time.sleep") as mock_sleep,
+    ):
+        items = monitor_news.fetch_news("https://example.com/news")
+
+    assert mock_get.call_count == 2
+    assert mock_sleep.call_count == 1
+    assert len(items) == 2
+
+
+def test_fetch_news_raises_after_all_retries_exhausted_http():
+    """Fetch should raise after MAX_RETRIES retryable HTTP errors."""
+    with (
+        patch(
+            "monitor_news.requests.get",
+            side_effect=_make_http_error(503),
+        ) as mock_get,
+        patch("monitor_news.time.sleep"),
+    ):
+        try:
+            monitor_news.fetch_news("https://example.com/news")
+            assert False, "Expected HTTPError"
+        except requests.HTTPError:
+            pass
+
+    assert mock_get.call_count == monitor_news.MAX_RETRIES
+
+
+def test_fetch_news_raises_after_all_retries_exhausted_network():
+    """Fetch should raise after MAX_RETRIES network errors."""
+    with (
+        patch(
+            "monitor_news.requests.get",
+            side_effect=requests.ConnectionError("down"),
+        ) as mock_get,
+        patch("monitor_news.time.sleep"),
+    ):
+        try:
+            monitor_news.fetch_news("https://example.com/news")
+            assert False, "Expected RequestException"
+        except requests.RequestException:
+            pass
+
+    assert mock_get.call_count == monitor_news.MAX_RETRIES
 
 
 # ---------------------------------------------------------------------------
