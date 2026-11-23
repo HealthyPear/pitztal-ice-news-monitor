@@ -47,6 +47,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 
 REQUEST_TIMEOUT = 30  # seconds
+GOOGLE_TRANSLATE_API_URL = "https://translate.googleapis.com/translate_a/single"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -215,28 +216,57 @@ def is_new(item: dict, last_seen: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def translate_to_english(text: str) -> str:
-    """Translate *text* from German to English using Google Translate.
+class TranslationError(Exception):
+    """Raised when a translation cannot be obtained."""
 
-    Falls back to the original text if translation fails.
-    """
+
+def translate_to_english(text: str) -> str:
+    """Translate *text* from German to English using Google Translate."""
     if not text:
         return text
     try:
         translated = GoogleTranslator(source="de", target="en").translate(text)
-        return translated or text
-    except TranslationNotFound:
-        logger.warning("Translation not found for text: %.80s", text)
-        return text
-    except TooManyRequests:
-        logger.warning("Translation rate-limited; returning original text.")
-        return text
-    except RequestError as exc:
-        logger.warning("Translation request error: %s", exc)
-        return text
-    except Exception as exc:  # noqa: BLE001 – catch-all for unexpected translator errors
-        logger.warning("Translation failed unexpectedly: %s", exc)
-        return text
+        if translated:
+            return translated
+        logger.warning(
+            "Google Translate returned an empty result; trying alternate endpoint."
+        )
+    except (
+        TranslationNotFound,
+        TooManyRequests,
+        RequestError,
+        requests.RequestException,
+    ) as exc:
+        logger.warning("Google Translate failed: %s; trying alternate endpoint.", exc)
+
+    try:
+        response = requests.get(
+            GOOGLE_TRANSLATE_API_URL,
+            params={"client": "gtx", "sl": "de", "tl": "en", "dt": "t", "q": text},
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+        segments = data[0]
+        if not isinstance(segments, list) or not segments:
+            raise ValueError("Missing translation segments")
+        if not all(
+            isinstance(segment, list) and segment and isinstance(segment[0], str)
+            for segment in segments
+        ):
+            raise ValueError("Invalid translation segments")
+        translated = "".join(segment[0] for segment in segments)
+        if not translated.strip():
+            raise ValueError("Empty translation")
+        return translated
+    except (
+        requests.RequestException,
+        ValueError,
+        TypeError,
+        IndexError,
+        KeyError,
+    ) as exc:
+        raise TranslationError("Google Translate alternate endpoint failed") from exc
 
 
 def translate_long_text(text: str, max_chunk_size: int = 4500) -> str:
@@ -493,4 +523,7 @@ if __name__ == "__main__":
         sys.exit(1)
     except requests.RequestException as exc:
         logger.error("Network error: %s", exc)
+        sys.exit(1)
+    except TranslationError as exc:
+        logger.error("Translation error: %s: %s", exc, exc.__cause__)
         sys.exit(1)

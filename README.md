@@ -106,6 +106,16 @@ pixi run monitor
 
 When run via GitHub Actions, the state is cached between runs so duplicate notifications are avoided.
 
+If Google Translate's usual endpoint fails or returns no result, the monitor tries
+an alternate Google Translate endpoint. If both fail, the workflow fails without
+sending or recording the update, so the next run can try again. Both endpoints
+are unofficial and can be rate-limited.
+
+An update already recorded in the GitHub Actions `last-seen-` caches will not be
+resent automatically. To resend it after deploying a fix, delete those caches in
+the repository's Actions cache settings and manually run the workflow. This can
+send a duplicate notification.
+
 ---
 
 ## Dependencies
