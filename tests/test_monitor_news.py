@@ -7,6 +7,13 @@ tests run fully offline without real credentials.
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+import requests
+from deep_translator.exceptions import (
+    RequestError,
+    TooManyRequests,
+    TranslationNotFound,
+)
 
 import monitor_news
 
@@ -92,38 +99,57 @@ def test_translate_success():
     assert result == "Hello"
 
 
-def test_translate_falls_back_on_translation_not_found():
-    from deep_translator.exceptions import TranslationNotFound
+@pytest.mark.parametrize(
+    "error", [TranslationNotFound("x"), RequestError(), TooManyRequests()]
+)
+def test_translate_uses_alternate_endpoint_on_failure(error):
+    response = MagicMock()
+    response.json.return_value = [[["Hello ", "Hallo "], ["world", "Welt"]]]
+    with (
+        patch("monitor_news.GoogleTranslator") as mock_cls,
+        patch("monitor_news.requests.get", return_value=response) as mock_get,
+    ):
+        mock_cls.return_value.translate.side_effect = error
+        assert monitor_news.translate_to_english("Hallo Welt") == "Hello world"
+    mock_get.assert_called_once_with(
+        monitor_news.GOOGLE_TRANSLATE_API_URL,
+        params={"client": "gtx", "sl": "de", "tl": "en", "dt": "t", "q": "Hallo Welt"},
+        timeout=monitor_news.REQUEST_TIMEOUT,
+    )
 
-    with patch("monitor_news.GoogleTranslator") as mock_cls:
-        mock_cls.return_value.translate.side_effect = TranslationNotFound("x")
-        result = monitor_news.translate_to_english("Hallo")
-    assert result == "Hallo"
+
+def test_translate_uses_alternate_endpoint_for_empty_result():
+    response = MagicMock()
+    response.json.return_value = [[["08.11.2026", "08.11.2026"]]]
+    with (
+        patch("monitor_news.GoogleTranslator") as mock_cls,
+        patch("monitor_news.requests.get", return_value=response),
+    ):
+        mock_cls.return_value.translate.return_value = None
+        assert monitor_news.translate_to_english("08.11.2026") == "08.11.2026"
 
 
-def test_translate_falls_back_on_request_error():
-    from deep_translator.exceptions import RequestError
-
-    with patch("monitor_news.GoogleTranslator") as mock_cls:
-        mock_cls.return_value.translate.side_effect = RequestError()
-        result = monitor_news.translate_to_english("Hallo")
-    assert result == "Hallo"
-
-
-def test_translate_falls_back_on_too_many_requests():
-    from deep_translator.exceptions import TooManyRequests
-
-    with patch("monitor_news.GoogleTranslator") as mock_cls:
+@pytest.mark.parametrize("data", [[], [None], [[[]]], [[[""]]]])
+def test_translate_rejects_invalid_alternate_response(data):
+    response = MagicMock()
+    response.json.return_value = data
+    with (
+        patch("monitor_news.GoogleTranslator") as mock_cls,
+        patch("monitor_news.requests.get", return_value=response),
+    ):
         mock_cls.return_value.translate.side_effect = TooManyRequests()
-        result = monitor_news.translate_to_english("Hallo")
-    assert result == "Hallo"
+        with pytest.raises(monitor_news.TranslationError):
+            monitor_news.translate_to_english("Hallo")
 
 
-def test_translate_falls_back_on_unexpected_error():
-    with patch("monitor_news.GoogleTranslator") as mock_cls:
-        mock_cls.return_value.translate.side_effect = RuntimeError("boom")
-        result = monitor_news.translate_to_english("Hallo")
-    assert result == "Hallo"
+def test_translate_reports_alternate_request_failure():
+    with (
+        patch("monitor_news.GoogleTranslator") as mock_cls,
+        patch("monitor_news.requests.get", side_effect=requests.Timeout()),
+    ):
+        mock_cls.return_value.translate.side_effect = TooManyRequests()
+        with pytest.raises(monitor_news.TranslationError):
+            monitor_news.translate_to_english("Hallo")
 
 
 # ---------------------------------------------------------------------------
@@ -413,5 +439,22 @@ def test_main_already_pulled_skips_notification(tmp_path, monkeypatch, capsys):
         monitor_news.main(preview=True, telegram=True)
 
     # Should NOT send telegram or save
+    mock_telegram.assert_not_called()
+    mock_save.assert_not_called()
+
+
+def test_main_does_not_send_or_save_when_translation_fails():
+    item = {"title": "Nachricht", "snippet": "Hallo", "link": "https://x.com"}
+    with (
+        patch("monitor_news.fetch_news", return_value=[item]),
+        patch("monitor_news.load_last_seen", return_value={}),
+        patch("monitor_news.GoogleTranslator") as mock_cls,
+        patch("monitor_news.requests.get", side_effect=requests.Timeout()),
+        patch("monitor_news.send_telegram_messages") as mock_telegram,
+        patch("monitor_news.save_last_seen") as mock_save,
+    ):
+        mock_cls.return_value.translate.side_effect = ["News", TooManyRequests()]
+        with pytest.raises(monitor_news.TranslationError):
+            monitor_news.main()
     mock_telegram.assert_not_called()
     mock_save.assert_not_called()
